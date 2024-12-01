@@ -1,0 +1,219 @@
+---
+title: "stunting"
+author: "Insyuzuu & Sabila"
+date: "2024-12-01"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import Library
+
+```{r}
+library(tidyverse)
+library(tidymodels) # Data splitting
+library(rpart) # Decision Tree Learning
+library(rpart.plot) # Visualisasi
+library(caret) # Confussion Matrix
+```
+
+## Data Gathering
+
+```{r}
+data <- read.csv("https://raw.githubusercontent.com/icainsyuzuu/FinalProjectDS/main/Stunting.csv")
+str(data)
+```
+
+## Data Prepocessing
+
+```{r}
+data$Birth.Weight <- as.numeric(data$Birth.Weight)
+data$Birth.Length <- as.numeric(data$Birth.Length)
+data$Gender <- as.factor(data$Gender)
+data$Stunting <- as.factor(data$Stunting)
+str(data)
+levels(data$Stunting)
+levels(data$Gender)
+```
+
+## Data Imputation
+
+```{r}
+# KOLOM NUMERIK DENGAN MEAN
+numeric_cols <- sapply(data, is.numeric)
+
+data[, numeric_cols] <- lapply(data[, numeric_cols], function(x) {
+  x[is.na(x)] <- mean(x, na.rm = TRUE) # Ganti NA dengan rata-rata
+  return(x)
+})
+
+# KOLOM NON NUMERIK DENGAN MODUS
+non_numeric_cols <- sapply(data, function(x) is.character(x) || is.factor(x))
+fill_mode <- function(x) {
+  if (is.factor(x)) {
+    mode_value <- names(which.max(table(x, useNA = "no"))) # Cari mode
+    x[is.na(x)] <- mode_value                             # Ganti NA dengan mode
+    x <- factor(x, levels = unique(x))                   # Pastikan faktor diperbarui
+  } else {
+    mode_value <- names(which.max(table(x, useNA = "no"))) # Cari mode
+    x[is.na(x)] <- mode_value                             # Ganti NA dengan mode
+  }
+  return(x)
+}
+data[, non_numeric_cols] <- lapply(data[, non_numeric_cols], fill_mode)
+```
+
+## Data Splitting
+
+```{r}
+set.seed(67)
+split = initial_split(data, prop = 0.8, strata = Stunting)
+data_train = split %>% training()
+data_test = split %>% testing()
+```
+
+## Modelling
+
+```{r}
+formula = "Stunting ~ Gender + Age + Birth.Weight + Birth.Length + Body.Weight + Body.Length"
+model <- rpart(formula, data = data_train, method = "class")
+summary(model)
+```
+
+## Data Testing
+
+```{r}
+prediksi = predict(object = model, newdata = data_test, type= "class")
+head(prediksi)
+```
+
+## Evaluasi Model
+
+```{r}
+table(
+  Predicted = prediksi, 
+  True = data_test$Stunting
+)
+akurasi = paste0(round(((10 + 8 + 10) / 30) * 100, digit = 2), "%")
+akurasi
+```
+
+## Visualisasi Data
+
+```{r}
+confusion_matrix = confusionMatrix(prediksi, data_test$Stunting)
+
+cm_data = as.data.frame(confusion_matrix$table)
+ggplot(cm_data, aes(Reference, Prediction, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), color = "white", size = 5) +
+  scale_fill_gradient(low = "grey", high = "blue") +
+  theme_minimal() +
+  labs(title = "Confusion Matrix for Stunting Prediction")
+```
+
+## Shiny App
+
+```{r}
+library(shiny)
+library(bslib)
+library(bsicons)
+```
+
+```{r}
+ui = page_fluid(
+  titlePanel("Stunting Classifier"),
+  layout_columns(
+    value_box( 
+      "Jumlah Stunting",
+      nrow(data %>% filter(Stunting == "Yes")),
+      theme = "bg-primary-subtle"
+    ),
+    value_box( 
+      "Jumlah Bukan Stunting",
+      nrow(data %>% filter(Stunting == "No")),
+      theme = "bg-success-subtle"
+    ),
+  ),
+  selectInput(
+    "Stunting",
+    "Pilih Klasifikasi:",
+    levels(data$Stunting)
+  ),
+  tableOutput("table_stunting"),
+  tags$br(), 
+  
+  titlePanel("Data Splitting"),
+  layout_columns(
+    value_box(
+      "Data Training",
+      nrow(data_train),
+      showcase = bsicons::bs_icon("list-task"),
+      theme = "text-primary"
+    ),
+    value_box(
+      "Data Testing",
+      nrow(data_test),
+      showcase = bsicons::bs_icon("list-check"),
+      theme = "text-success"
+    ),
+  ),
+  tags$br(), ## Ganti Baris
+  
+  titlePanel("Hasil Evaluasi"),
+  value_box("Akurasi", akurasi, theme = "text-success"),
+  tags$br(), 
+  
+  titlePanel("Stunting Classifier"),
+  layout_columns(
+    selectInput("gender", "Gender", 
+              choices = c("Male", "Female"), 
+              selected = "Male"),
+    numericInput( "age", "Age", value = 1),
+    numericInput( "biw", "Birth Weight", value = 1),
+    numericInput( "bil", "Birth Length", value = 1),
+    numericInput("bow", "Body Weight", value = 1),
+    numericInput("bol", "Body Length", value = 1),
+  ),
+  actionButton("cek_klasifikasi", "Hasil"), 
+  tags$br(), # <- Ganti Baris
+  tags$br(), # <- Ganti Baris
+  
+  textOutput("hasil_klasifikasi"),
+  tags$br(), # <- Ganti Baris
+)
+
+# Fungsionalitas
+server = function(input, output) {
+  output$table_stunting = renderTable(
+    head(data %>% filter(Stunting == input$Stunting)),
+    width = "100%",
+    striped = TRUE # <- Ngasih garis-garis
+  )
+  
+  output$hasil_klasifikasi = renderText({
+    # Buat dataframe berdasarkan input
+    input_prediksi = data.frame(
+      Gender = factor(input$gender, levels = levels(data$Gender)),  
+      Age = input$age,
+      Birth.Length = input$bil,
+      Birth.Weight = input$biw,
+      Body.Length = input$bol,
+      Body.Weight = input$bow
+    )
+    
+    # Prediksi kelas
+    hasil = predict(object = model, newdata = input_prediksi, type= "class")
+    
+    # Prediksi probabilitas
+    hasil_prob = predict(object = model, newdata = input_prediksi, type= "prob")
+    hasil_prob = hasil_prob[hasil] * 100
+    
+    paste("Prediksi : ", hasil, " dengan probabilitas : ", round(hasil_prob, 2), "%")
+  }) |> bindEvent(input$cek_klasifikasi)
+}
+
+shinyApp(ui, server)
+```
